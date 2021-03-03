@@ -12,10 +12,9 @@ Device state
 */
 var PocketOperatorMode;
 (function (PocketOperatorMode) {
-    PocketOperatorMode[PocketOperatorMode["Default"] = 0] = "Default";
-    PocketOperatorMode[PocketOperatorMode["Drawing"] = 1] = "Drawing";
-    PocketOperatorMode[PocketOperatorMode["RecordingAPattern"] = 2] = "RecordingAPattern";
-    PocketOperatorMode[PocketOperatorMode["Playing"] = 3] = "Playing";
+    PocketOperatorMode[PocketOperatorMode["Drawing"] = 0] = "Drawing";
+    PocketOperatorMode[PocketOperatorMode["RecordingAPattern"] = 1] = "RecordingAPattern";
+    PocketOperatorMode[PocketOperatorMode["Playing"] = 2] = "Playing";
 })(PocketOperatorMode || (PocketOperatorMode = {}));
 /**
 Drawing per button
@@ -30,22 +29,16 @@ var Drawing = /** @class */ (function () {
     Drawing.prototype.addPoint = function (point) {
         this.clickX.push(point.x);
         this.clickY.push(point.y);
-        //this.clickDrag.push(dragging);
     };
     /**
     An active drawing is full color
     */
     Drawing.prototype.draw = function (isActive, context) {
         var clickX = this.clickX;
-        //let clickDrag = this.clickDrag;
         var clickY = this.clickY;
         for (var i = 0; i < clickX.length; ++i) {
             context.beginPath();
-            // if (clickDrag[i] && i) {
-            //                 context.moveTo(clickX[i - 1], clickY[i - 1]);
-            //             } else {
             context.moveTo(clickX[i] - 1, clickY[i]);
-            //}
             context.strokeStyle = isActive ? this.activeColor : this.inactiveColor;
             context.lineTo(clickX[i], clickY[i]);
             context.stroke();
@@ -61,62 +54,98 @@ var PocketOperatorIDApp = /** @class */ (function () {
     // MARK: - Constructor
     function PocketOperatorIDApp() {
         var _this = this;
+        // drawing per layer
         this.buttonDrawings = [new Drawing(), new Drawing(), new Drawing(), new Drawing(),
             new Drawing(), new Drawing(), new Drawing(), new Drawing(),
             new Drawing(), new Drawing(), new Drawing(), new Drawing(),
             new Drawing(), new Drawing(), new Drawing(), new Drawing()];
+        // currently selected layer
         this.activeButton = 0;
+        // Animatable active button
+        this.activeAnimationLayer = 0;
+        // Is the user drawing?
         this.drawing = false;
+        // number of pocket operator buttons
         this.maxButtons = 16;
         // Limited to just a single pattern for proof of concept
         this.pattern = new Array(16);
+        // background fill of the canvas
         this.canvasBackgroundColor = "#DCDCDC";
+        // beats per minute
+        this.beatsPerMinuteInMiliseconds = 60000 / 120;
         this.clearHandler = function () {
+            if (_this.operatorMode == PocketOperatorMode.Playing) {
+                return;
+            }
+            _this.buttonDrawings = [new Drawing(), new Drawing(), new Drawing(), new Drawing(),
+                new Drawing(), new Drawing(), new Drawing(), new Drawing(),
+                new Drawing(), new Drawing(), new Drawing(), new Drawing(),
+                new Drawing(), new Drawing(), new Drawing(), new Drawing()];
             _this.clearCanvas();
         };
         this.exportHandler = function () {
             alert('Maybe we can ask Teenage Engineering nicely to add this feature?');
         };
+        this.playHandler = function () {
+            if (_this.operatorMode != PocketOperatorMode.Playing) {
+                _this.operatorMode = PocketOperatorMode.Playing;
+                document.getElementById('play').className = "active";
+                _this.playAnimation();
+            }
+            else {
+                _this.operatorMode = PocketOperatorMode.Drawing;
+                document.getElementById('play').className = "inactive";
+                _this.stopAnimation();
+            }
+        };
         this.onDownHandler = function (e) {
+            if (_this.operatorMode != PocketOperatorMode.Drawing) {
+                return;
+            }
             var position = _this.calculateCursorPosition(e);
             _this.drawing = true;
             _this.buttonDrawings[_this.activeButton].addPoint(position);
         };
         this.onDragHandler = function (e) {
+            if (_this.operatorMode != PocketOperatorMode.Drawing) {
+                return;
+            }
             if (!_this.drawing) {
                 return;
             }
             var position = _this.calculateCursorPosition(e);
             _this.buttonDrawings[_this.activeButton].addPoint(position);
-            _this.draw();
+            _this.draw(_this.activeButton);
             e.preventDefault();
         };
         this.onUpHandler = function (e) {
             var position = _this.calculateCursorPosition(e);
             _this.drawing = false;
-            _this.draw();
+            _this.draw(_this.activeButton);
         };
         this.onCancelledHandler = function () {
             _this.drawing = false;
-            _this.draw();
+            _this.draw(_this.activeButton);
         };
         this.onChangeButtondHandler = function (e) {
             // Convert string identifier to an index
             var padIdentifier = +e.target.id.replace("pad", "");
             _this.activeButton = padIdentifier;
-            _this.draw();
+            _this.draw(_this.activeButton);
+            _this.changeSelectedButton(padIdentifier);
         };
         var canvas = document.getElementById('canvas');
         var context = canvas.getContext("2d");
         context.lineCap = 'round';
         context.lineJoin = 'round';
-        //context.strokeStyle = 'black';
         context.lineWidth = 2;
         this.buttonDrawings.push(new Drawing());
         this.canvas = canvas;
         this.context = context;
         this.createUserEvents();
         this.clearCanvas();
+        this.operatorMode = PocketOperatorMode.Drawing;
+        //PocketOperatorMode.Playing
     }
     // MARK:- Event Handlers
     PocketOperatorIDApp.prototype.createUserEvents = function () {
@@ -134,13 +163,21 @@ var PocketOperatorIDApp = /** @class */ (function () {
         // HTML buttons
         document.getElementById('clear').addEventListener("click", this.clearHandler);
         document.getElementById('export').addEventListener("click", this.exportHandler);
+        document.getElementById('play').addEventListener("click", this.playHandler);
         // Pads
         for (var i = 0; i < this.maxButtons; i++) {
             document.getElementById('pad' + i).addEventListener("click", this.onChangeButtondHandler);
+            if (i == this.activeButton) {
+                document.getElementById('pad' + i).className = "active";
+            }
         }
     };
     // MARK: - Drawing
-    PocketOperatorIDApp.prototype.draw = function () {
+    /**
+    Depending on whether we are manually drawing or not
+    depends on which is the active layer
+    */
+    PocketOperatorIDApp.prototype.draw = function (activeLayer) {
         var context = this.context;
         var canvas = this.canvas;
         context.rect(0, 0, canvas.width, canvas.height);
@@ -149,7 +186,7 @@ var PocketOperatorIDApp = /** @class */ (function () {
         var buttonDrawingsCount = this.buttonDrawings.length;
         for (var i = 0; i < buttonDrawingsCount; i++) {
             var buttonDrawing = this.buttonDrawings[i];
-            buttonDrawing.draw(this.activeButton == i, context);
+            buttonDrawing.draw(activeLayer == i, context);
         }
     };
     // MARK: - Screen calculations
@@ -178,6 +215,39 @@ var PocketOperatorIDApp = /** @class */ (function () {
         context.rect(0, 0, canvas.width, canvas.height);
         context.fillStyle = this.canvasBackgroundColor;
         context.fill();
+    };
+    // MARK: - UI Button updates
+    PocketOperatorIDApp.prototype.changeSelectedButton = function (to) {
+        for (var i = 0; i < this.maxButtons; i++) {
+            if (i != to) {
+                document.getElementById('pad' + i).className = "inactive";
+            }
+            else {
+                document.getElementById('pad' + i).className = "active";
+            }
+        }
+    };
+    // MARK: - Animation
+    PocketOperatorIDApp.prototype.playAnimation = function () {
+        this.stopAnimation();
+        this.activeAnimationLayer = 0;
+        var localThis = this;
+        this.animationTimer = setInterval(function () {
+            localThis.animateView(localThis);
+        }, this.beatsPerMinuteInMiliseconds);
+    };
+    PocketOperatorIDApp.prototype.stopAnimation = function () {
+        clearInterval(this.animationTimer);
+        this.animationTimer = undefined;
+        this.changeSelectedButton(this.activeButton);
+    };
+    PocketOperatorIDApp.prototype.animateView = function (executer) {
+        executer.draw(this.activeAnimationLayer);
+        executer.changeSelectedButton(this.activeAnimationLayer);
+        executer.activeAnimationLayer = this.activeAnimationLayer + 1;
+        if (executer.activeAnimationLayer > executer.maxButtons) {
+            executer.activeAnimationLayer = 0;
+        }
     };
     return PocketOperatorIDApp;
 }());

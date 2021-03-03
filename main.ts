@@ -12,7 +12,6 @@
 Device state
 */
 enum PocketOperatorMode {
-  Default,
   Drawing,
   RecordingAPattern,
   Playing,
@@ -31,7 +30,6 @@ class Drawing {
     public addPoint(point) {
         this.clickX.push(point.x);
         this.clickY.push(point.y);
-        //this.clickDrag.push(dragging);
     }
     
     /**
@@ -39,15 +37,10 @@ class Drawing {
     */
     public draw(isActive: boolean, context) {
         let clickX = this.clickX;
-        //let clickDrag = this.clickDrag;
         let clickY = this.clickY;
         for (let i = 0; i < clickX.length; ++i) {
             context.beginPath();
-            // if (clickDrag[i] && i) {
-//                 context.moveTo(clickX[i - 1], clickY[i - 1]);
-//             } else {
-                context.moveTo(clickX[i] - 1, clickY[i]);
-            //}
+            context.moveTo(clickX[i] - 1, clickY[i]);
             context.strokeStyle = isActive ? this.activeColor : this.inactiveColor;
             context.lineTo(clickX[i], clickY[i]);
             context.stroke();
@@ -63,25 +56,44 @@ class PocketOperatorIDApp {
 
     // MARK: - Properties
 
+    // Reference to the HTML canvas element
     private canvas: HTMLCanvasElement;
+    
+    // drawing Context
     private context: CanvasRenderingContext2D;
+    
+    // mode of operation
     private operatorMode: PocketOperatorMode;
     
+    // drawing per layer
     private buttonDrawings: Array<Drawing> = [new Drawing(),new Drawing(),new Drawing(),new Drawing(),
                                                 new Drawing(),new Drawing(),new Drawing(),new Drawing(),
                                                 new Drawing(),new Drawing(),new Drawing(),new Drawing(),
                                                 new Drawing(),new Drawing(),new Drawing(),new Drawing()];
-    
+
+    // currently selected layer
     private activeButton: number = 0;
     
+    // Animatable active button
+    private activeAnimationLayer = 0;
+    
+    // Is the user drawing?
     private drawing: boolean = false;
     
+    // number of pocket operator buttons
     private maxButtons: number = 16;
     
     // Limited to just a single pattern for proof of concept
     private pattern: Array<Drawing> = new Array(16);
     
+    // background fill of the canvas
     private canvasBackgroundColor = "#DCDCDC";
+    
+    // beats per minute
+    private beatsPerMinuteInMiliseconds = 60000 / 120;
+    
+    // Used when animating
+    private animationTimer;
     
     // MARK: - Constructor
 
@@ -91,7 +103,6 @@ class PocketOperatorIDApp {
         let context = canvas.getContext("2d");
         context.lineCap = 'round';
         context.lineJoin = 'round';
-        //context.strokeStyle = 'black';
         context.lineWidth = 2;
         
         this.buttonDrawings.push(new Drawing());
@@ -102,6 +113,9 @@ class PocketOperatorIDApp {
         this.createUserEvents();
         
         this.clearCanvas()
+        
+        this.operatorMode = PocketOperatorMode.Drawing;
+//PocketOperatorMode.Playing
     }
     
     // MARK:- Event Handlers
@@ -124,14 +138,29 @@ class PocketOperatorIDApp {
         // HTML buttons
         document.getElementById('clear').addEventListener("click", this.clearHandler);
         document.getElementById('export').addEventListener("click", this.exportHandler);
+        document.getElementById('play').addEventListener("click", this.playHandler);
         
         // Pads
         for (let i = 0; i < this.maxButtons; i++) {
             document.getElementById('pad' + i).addEventListener("click", this.onChangeButtondHandler);
+            
+            if (i == this.activeButton) {
+                document.getElementById('pad' + i).className = "active";
+            }
         }
     }
     
     private clearHandler = () => {
+    
+        if (this.operatorMode == PocketOperatorMode.Playing) {
+            return
+        }
+    
+        this.buttonDrawings = [new Drawing(),new Drawing(),new Drawing(),new Drawing(),
+                                new Drawing(),new Drawing(),new Drawing(),new Drawing(),
+                                new Drawing(),new Drawing(),new Drawing(),new Drawing(),
+                                new Drawing(),new Drawing(),new Drawing(),new Drawing()];
+    
         this.clearCanvas()
     }
     
@@ -139,7 +168,24 @@ class PocketOperatorIDApp {
         alert('Maybe we can ask Teenage Engineering nicely to add this feature?');
     }
     
+    private playHandler = () => {
+        if (this.operatorMode != PocketOperatorMode.Playing) {
+            this.operatorMode = PocketOperatorMode.Playing;
+            document.getElementById('play').className = "active";
+            this.playAnimation();
+        } else {
+            this.operatorMode = PocketOperatorMode.Drawing;
+            document.getElementById('play').className = "inactive";
+            this.stopAnimation();
+        }
+    }
+    
     private onDownHandler = (e: MouseEvent | TouchEvent) => {
+    
+        if (this.operatorMode != PocketOperatorMode.Drawing) {
+            return
+        }
+    
         let position = this.calculateCursorPosition(e);
         
         this.drawing = true;
@@ -149,6 +195,10 @@ class PocketOperatorIDApp {
     
     private onDragHandler = (e: MouseEvent | TouchEvent) => {
     
+        if (this.operatorMode != PocketOperatorMode.Drawing) {
+            return
+        }
+    
         if (!this.drawing) {
             return;
         }
@@ -157,7 +207,7 @@ class PocketOperatorIDApp {
         
         this.buttonDrawings[this.activeButton].addPoint(position);
         
-        this.draw();
+        this.draw(this.activeButton);
     
         e.preventDefault();
     }
@@ -167,13 +217,13 @@ class PocketOperatorIDApp {
         
         this.drawing = false;
         
-        this.draw();
+        this.draw(this.activeButton);
     }
     
     private onCancelledHandler = () => {
         this.drawing = false;
         
-        this.draw();
+        this.draw(this.activeButton);
     }
     
     private onChangeButtondHandler = (e) => {
@@ -183,12 +233,18 @@ class PocketOperatorIDApp {
         
         this.activeButton = padIdentifier;
         
-        this.draw();
+        this.draw(this.activeButton);
+        
+        this.changeSelectedButton(padIdentifier);
     }
     
     // MARK: - Drawing
     
-    private draw() {
+    /**
+    Depending on whether we are manually drawing or not
+    depends on which is the active layer
+    */
+    private draw(activeLayer:number) {
     
         let context = this.context;
         let canvas = this.canvas;
@@ -200,7 +256,7 @@ class PocketOperatorIDApp {
         let buttonDrawingsCount = this.buttonDrawings.length;
         for (let i = 0; i < buttonDrawingsCount; i++) {
             let buttonDrawing = this.buttonDrawings[i];
-            buttonDrawing.draw(this.activeButton == i, context);
+            buttonDrawing.draw(activeLayer == i, context);
         }
     
     }
@@ -237,7 +293,47 @@ class PocketOperatorIDApp {
         context.fill();
     }
     
+    // MARK: - UI Button updates
+    
+    private changeSelectedButton(to) {
+        for (let i = 0; i < this.maxButtons; i++) {  
+            if (i != to) {
+               document.getElementById('pad' + i).className = "inactive";
+            } else {
+              document.getElementById('pad' + i).className = "active";
+            }
+        }
+    }
+    
     // MARK: - Animation
+    
+    private playAnimation() {
+        this.stopAnimation();
+        this.activeAnimationLayer = 0;
+        var localThis = this
+        this.animationTimer = setInterval(function() {
+            localThis.animateView(localThis);
+        }, this.beatsPerMinuteInMiliseconds);
+    }
+    
+    private stopAnimation() {
+        clearInterval(this.animationTimer);
+        this.animationTimer = undefined;
+        this.changeSelectedButton(this.activeButton);
+    }
+    
+    private animateView(executer) {
+    
+        executer.draw(this.activeAnimationLayer);
+
+        executer.changeSelectedButton(this.activeAnimationLayer);
+
+        executer.activeAnimationLayer = this.activeAnimationLayer + 1;
+
+        if (executer.activeAnimationLayer > executer.maxButtons) {
+            executer.activeAnimationLayer = 0;
+        }
+    }
 }
 
 new PocketOperatorIDApp();
