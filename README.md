@@ -10,6 +10,8 @@ it on a Pocket Operator.
 
 This code is just a proof of concept for allowing a user to design their own.
 
+![This would be cool](https://github.com/nthState/PO-ID/blob/main/readmeAssets/video.gif?raw=true)
+
 # Todo
 
 - [ ] On-load a custom sequence should be playing
