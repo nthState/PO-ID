@@ -14,6 +14,7 @@ This code is just a proof of concept for allowing a user to design their own.
 
 # Todo
 
+- [ ] I imagine the final interface wouldn't be the PO device itself, something else, the device is here just so you can sketch things out
 - [ ] On-load a custom sequence should be playing
 - [ ] Draw mode, one item selected at a time
 - [ ] Draw mode, draw on canvas
